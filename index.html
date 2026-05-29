@@ -1,0 +1,1373 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>data sonification[City's Breath]</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg:           #07070f;
+      --fg:           rgba(230, 225, 215, 0.88);
+      --fg-dim:       rgba(230, 225, 215, 0.30);
+      --fg-faint:     rgba(230, 225, 215, 0.09);
+      --glass-bg:     rgba(8, 8, 18, 0.60);
+      --glass-border: rgba(255, 255, 255, 0.07);
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--fg);
+      font-family: 'Courier New', Courier, monospace;
+      overflow: hidden;
+      height: 100vh; width: 100vw;
+      user-select: none;
+    }
+
+    #canvas-container { position: fixed; inset: 0; z-index: 1; }
+    #canvas-container canvas { display: block; }
+
+    #ui {
+      position: fixed; inset: 0; z-index: 10;
+      display: flex; flex-direction: column;
+      justify-content: space-between;
+      padding: 24px 28px;
+      pointer-events: none;
+    }
+
+    /* ── 헤더 ── */
+    #header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      min-width: 0;
+    }
+
+    #title-group {
+      flex: 0 1 auto;
+      min-width: 0;
+    }
+
+    #title-group h1 {
+      font-size: 1.05rem; font-weight: 300;
+      letter-spacing: 0.16em;
+      color: rgba(230,225,215,0.92);
+      line-height: 1.5;
+    }
+    #title-mode {
+      font-size: 0.88rem;
+      letter-spacing: 0.12em;
+      color: rgba(230,225,215,0.62);
+    }
+    #title-group .subtitle {
+      font-size: 0.58rem; color: var(--fg-dim);
+      letter-spacing: 0.22em; margin-top: 6px;
+      text-transform: uppercase;
+    }
+
+    /* ── 모드 토글 ── */
+    #mode-toggle {
+      display: flex; gap: 3px;
+      align-self: flex-start;
+      flex-shrink: 0;
+      pointer-events: all;
+      background: var(--glass-bg);
+      border: 1px solid var(--glass-border);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border-radius: 24px;
+      padding: 4px;
+    }
+    .mode-btn {
+      background: none; border: none; cursor: pointer;
+      font-family: inherit; font-size: 0.68rem;
+      letter-spacing: 0.16em; text-transform: uppercase;
+      color: var(--fg-dim);
+      padding: 6px 16px; border-radius: 20px;
+      transition: background 0.2s, color 0.2s;
+      white-space: nowrap;
+    }
+    .mode-btn.active {
+      background: rgba(255,255,255,0.10);
+      color: rgba(230,225,215,0.9);
+    }
+    .mode-btn:hover:not(.active) { color: rgba(230,225,215,0.6); }
+
+    #date-group { text-align: right; flex-shrink: 0; }
+    #date-group .date {
+      font-size: 1.0rem; color: rgba(230,225,215,0.62);
+      letter-spacing: 0.12em;
+    }
+    #date-group .step {
+      font-size: 0.57rem; color: var(--fg-dim);
+      letter-spacing: 0.12em; margin-top: 5px;
+    }
+
+    /* ── 좌측 패널 공통 ── */
+    #left-panel {
+      align-self: flex-start;
+      display: flex; flex-direction: column; gap: 10px;
+      min-width: 0;
+      max-width: min(260px, calc(100vw - 56px));
+    }
+
+    /* ── 데이터 미터 ── */
+    #section-data {
+      background: var(--glass-bg);
+      border: 1px solid var(--glass-border);
+      backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+      border-radius: 12px; padding: 18px 22px;
+      min-width: 210px;
+      display: flex; flex-direction: column; gap: 15px;
+    }
+    .meter-top {
+      display: flex; justify-content: space-between;
+      align-items: baseline; margin-bottom: 5px;
+    }
+    .meter-label {
+      font-size: 0.57rem; color: var(--fg-dim);
+      letter-spacing: 0.2em; text-transform: uppercase;
+    }
+    .meter-value {
+      font-size: 0.95rem; font-weight: 300; color: var(--fg);
+      min-width: 88px; text-align: right;
+    }
+    .meter-bar {
+      width: 100%; height: 2px;
+      background: var(--fg-faint); border-radius: 1px; overflow: hidden;
+    }
+    .meter-fill {
+      height: 100%; border-radius: 1px; width: 0%;
+      transition: width 0.65s cubic-bezier(0.25,0.46,0.45,0.94);
+    }
+    .fill-pm25     { background: linear-gradient(90deg,#ff8c42,#ffcc30); }
+    .fill-temp     { background: linear-gradient(90deg,#4488ff,#ff5060); }
+    .fill-humidity { background: linear-gradient(90deg,#42a8ff,#00ddcc); }
+
+    /* ── 음악 섹션 ── */
+    #section-music {
+      display: none;
+      flex-direction: column; gap: 10px;
+      min-width: 0; width: 100%;
+    }
+
+    #drop-zone {
+      pointer-events: all;
+      background: var(--glass-bg);
+      border: 1px dashed rgba(255,255,255,0.14);
+      backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+      border-radius: 12px; padding: 22px 18px;
+      text-align: center; cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    #drop-zone:hover, #drop-zone.drag-over {
+      border-color: rgba(255,255,255,0.38);
+      background: rgba(255,255,255,0.04);
+    }
+    #drop-zone .upload-arrow {
+      font-size: 1.6rem; color: rgba(255,255,255,0.25);
+      margin-bottom: 10px; display: block;
+    }
+    #drop-zone .upload-text {
+      font-size: 0.65rem; color: var(--fg-dim);
+      letter-spacing: 0.12em; line-height: 1.6;
+    }
+    #drop-zone .upload-ext {
+      font-size: 0.58rem; color: rgba(255,255,255,0.18);
+      margin-top: 6px; letter-spacing: 0.1em;
+    }
+
+    #music-info {
+      background: var(--glass-bg);
+      border: 1px solid var(--glass-border);
+      backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+      border-radius: 10px; padding: 12px 16px;
+      display: none; flex-direction: column; gap: 6px;
+      pointer-events: all; cursor: pointer;
+    }
+    #music-info:hover { border-color: rgba(255,255,255,0.18); }
+    #music-filename {
+      font-size: 0.68rem; color: rgba(230,225,215,0.75);
+      letter-spacing: 0.08em;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    #music-meta { font-size: 0.58rem; color: var(--fg-dim); letter-spacing: 0.1em; }
+
+    #progress-wrap { width: 100%; display: none; flex-direction: column; gap: 4px; }
+    #progress-bar {
+      width: 100%; height: 2px;
+      background: var(--fg-faint); border-radius: 1px; overflow: hidden;
+    }
+    #progress-fill {
+      height: 100%; width: 0%;
+      background: linear-gradient(90deg, #a040ff, #4080ff);
+      border-radius: 1px; transition: width 0.1s linear;
+    }
+    #progress-time { font-size: 0.56rem; color: var(--fg-dim); letter-spacing: 0.1em; text-align: right; }
+
+    #freq-meters {
+      background: var(--glass-bg);
+      border: 1px solid var(--glass-border);
+      backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+      border-radius: 12px; padding: 14px 18px;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .fill-bass   { background: linear-gradient(90deg,#ff4060,#ff8030); }
+    .fill-mid    { background: linear-gradient(90deg,#40a0ff,#8040ff); }
+    .fill-treble { background: linear-gradient(90deg,#00ddcc,#40ff80); }
+
+    /* ── 하단 ── */
+    #footer {
+      display: flex; justify-content: space-between;
+      align-items: flex-end; gap: 16px; min-width: 0;
+    }
+
+    #controls {
+      display: flex; align-items: center; gap: 16px;
+      pointer-events: all;
+      background: var(--glass-bg);
+      border: 1px solid var(--glass-border);
+      backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+      border-radius: 36px; padding: 11px 20px;
+      flex-shrink: 0;
+    }
+
+    #play-btn {
+      width: 40px; height: 40px;
+      border: 1px solid rgba(255,255,255,0.22);
+      background: rgba(255,255,255,0.07);
+      color: rgba(255,255,255,0.9); border-radius: 50%;
+      cursor: pointer; font-size: 0.95rem;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      transition: background 0.2s, border-color 0.2s, transform 0.1s;
+    }
+    #play-btn:hover  { background: rgba(255,255,255,0.14); border-color: rgba(255,255,255,0.42); }
+    #play-btn:active { transform: scale(0.92); }
+
+    .ctrl-group { display: flex; align-items: center; gap: 8px; }
+    .ctrl-label { font-size: 0.57rem; color: var(--fg-dim); letter-spacing: 0.15em; white-space: nowrap; }
+    .ctrl-val   { font-size: 0.67rem; color: rgba(230,225,215,0.52); min-width: 26px; }
+
+    input[type="range"] {
+      -webkit-appearance: none; appearance: none;
+      width: 88px; height: 2px;
+      background: rgba(255,255,255,0.15); border-radius: 1px;
+      outline: none; cursor: pointer;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 11px; height: 11px; border-radius: 50%;
+      background: rgba(255,255,255,0.82); cursor: pointer;
+      transition: transform 0.1s;
+    }
+    input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.3); }
+
+    #note-readout { font-size: 0.8rem; color: rgba(230,225,215,0.45); letter-spacing: 0.08em; min-width: 50px; }
+
+    #beat-indicator {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: rgba(160,64,255,0.3); display: none;
+      transition: background 0.05s, box-shadow 0.05s;
+    }
+    #beat-indicator.flash {
+      background: rgba(160,64,255,1);
+      box-shadow: 0 0 10px rgba(160,64,255,0.8), 0 0 20px rgba(160,64,255,0.4);
+    }
+
+    #legend { display: flex; flex-direction: column; gap: 5px; align-items: flex-end; }
+    .legend-row { display: flex; align-items: center; gap: 7px; font-size: 0.57rem; color: var(--fg-dim); letter-spacing: 0.09em; }
+    .legend-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+
+    #status-bar {
+      position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
+      font-size: 0.57rem; color: rgba(230,225,215,0.18);
+      letter-spacing: 0.08em; z-index: 11; white-space: nowrap;
+      pointer-events: none;
+    }
+
+    #file-input { display: none; }
+
+    /* ── 반응형 ── */
+    @media (max-width: 900px) {
+      #legend { max-width: 200px; }
+      .legend-row { font-size: 0.52rem; }
+    }
+    @media (max-width: 700px) {
+      #legend { display: none; }
+      #date-group .step { display: none; }
+    }
+    @media (max-width: 520px) {
+      #ui { padding: 14px 16px; }
+      #title-group h1 { font-size: 0.88rem; letter-spacing: 0.1em; }
+      #title-mode { font-size: 0.76rem; }
+      #date-group { display: none; }
+      #section-data { min-width: unset; padding: 14px 16px; }
+      #section-music { max-width: 100%; }
+      #freq-meters { padding: 10px 14px; }
+      .meter-value { min-width: 70px; font-size: 0.82rem; }
+      #controls { gap: 10px; padding: 8px 14px; }
+      input[type="range"] { width: 60px; }
+      #left-panel { max-width: calc(100vw - 32px); }
+    }
+  </style>
+</head>
+<body>
+
+<div id="canvas-container"></div>
+<input type="file" id="file-input" accept=".mp4,.wav,.mp3,.ogg,.flac,.aac">
+
+<div id="ui">
+
+  <div id="header">
+    <div id="title-group">
+      <h1>data sonification<br><span id="title-mode">[City's Breath]</span></h1>
+      <p class="subtitle" id="subtitle-text">City's Breath &nbsp;·&nbsp; Generative A/V</p>
+    </div>
+
+    <div id="mode-toggle">
+      <button class="mode-btn active" id="btn-data-mode">데이터</button>
+      <button class="mode-btn"        id="btn-music-mode">음악</button>
+    </div>
+
+    <div id="date-group">
+      <div class="date" id="ui-date">— — —</div>
+      <div class="step" id="ui-step">STEP 0 / 0</div>
+    </div>
+  </div>
+
+  <div id="left-panel">
+
+    <div id="section-data">
+      <div class="meter">
+        <div class="meter-top">
+          <span class="meter-label">PM2.5</span>
+          <span class="meter-value" id="val-pm25">— μg/m³</span>
+        </div>
+        <div class="meter-bar"><div class="meter-fill fill-pm25" id="bar-pm25"></div></div>
+      </div>
+      <div class="meter">
+        <div class="meter-top">
+          <span class="meter-label">기온</span>
+          <span class="meter-value" id="val-temp">— °C</span>
+        </div>
+        <div class="meter-bar"><div class="meter-fill fill-temp" id="bar-temp"></div></div>
+      </div>
+      <div class="meter">
+        <div class="meter-top">
+          <span class="meter-label">습도</span>
+          <span class="meter-value" id="val-humidity">— %</span>
+        </div>
+        <div class="meter-bar"><div class="meter-fill fill-humidity" id="bar-humidity"></div></div>
+      </div>
+    </div>
+
+    <div id="section-music">
+      <div id="drop-zone">
+        <span class="upload-arrow">↑</span>
+        <div class="upload-text">MP4 · WAV · MP3 파일<br>드래그하거나 클릭하여 업로드</div>
+        <div class="upload-ext">FLAC · OGG · AAC 지원</div>
+      </div>
+
+      <div id="music-info">
+        <div id="music-filename">—</div>
+        <div id="music-meta">—</div>
+      </div>
+
+      <div id="progress-wrap">
+        <div id="progress-bar"><div id="progress-fill"></div></div>
+        <div id="progress-time">0:00 / 0:00</div>
+      </div>
+
+      <div id="freq-meters">
+        <div class="meter">
+          <div class="meter-top">
+            <span class="meter-label">BASS</span>
+            <span class="meter-value" id="val-bass">—</span>
+          </div>
+          <div class="meter-bar"><div class="meter-fill fill-bass" id="bar-bass"></div></div>
+        </div>
+        <div class="meter">
+          <div class="meter-top">
+            <span class="meter-label">MID</span>
+            <span class="meter-value" id="val-mid">—</span>
+          </div>
+          <div class="meter-bar"><div class="meter-fill fill-mid" id="bar-mid"></div></div>
+        </div>
+        <div class="meter">
+          <div class="meter-top">
+            <span class="meter-label">TREBLE</span>
+            <span class="meter-value" id="val-treble">—</span>
+          </div>
+          <div class="meter-bar"><div class="meter-fill fill-treble" id="bar-treble"></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="footer">
+
+    <div id="controls">
+      <button id="play-btn" title="재생 / 정지">▶</button>
+
+      <div class="ctrl-group" id="speed-group">
+        <span class="ctrl-label">SPEED</span>
+        <input type="range" id="speed-slider" min="0.5" max="6" step="0.5" value="1">
+        <span class="ctrl-val" id="speed-val">1×</span>
+      </div>
+
+      <div id="note-readout">♩ —</div>
+      <div id="beat-indicator" title="Beat"></div>
+    </div>
+
+    <div id="legend">
+      <div id="legend-data">
+        <div class="legend-row"><div class="legend-dot" style="background:#ffaa40"></div><span>PM2.5 → 멜로디 음높이</span></div>
+        <div class="legend-row"><div class="legend-dot" style="background:#ff5060"></div><span>기온 → 음 길이</span></div>
+        <div class="legend-row"><div class="legend-dot" style="background:#42a8ff"></div><span>습도 → 잔향 · 딜레이</span></div>
+        <div class="legend-row"><div class="legend-dot" style="background:#cc44ff"></div><span>PM2.5 &gt; 0.7 → 타악 레이어</span></div>
+      </div>
+      <div id="legend-music" style="display:none">
+        <div class="legend-row"><div class="legend-dot" style="background:#ff4060"></div><span>Bass → 입자 폭발 · 파문</span></div>
+        <div class="legend-row"><div class="legend-dot" style="background:#8040ff"></div><span>Mid → 오라 · 오로라</span></div>
+        <div class="legend-row"><div class="legend-dot" style="background:#00ddcc"></div><span>Treble → 스펙트럼 · 스파크</span></div>
+        <div class="legend-row"><div class="legend-dot" style="background:#ffffffaa"></div><span>Beat → 비트 파문</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="status-bar">데이터 로딩 중...</div>
+
+<script>
+'use strict';
+
+const MAPPING = {
+  PENTATONIC: [
+    'C3','D3','E3','G3','A3',
+    'C4','D4','E4','G4','A4',
+    'C5','D5','E5','G5','A5'
+  ],
+  TEMP_COLD_THRESH: 0.33,
+  TEMP_HOT_THRESH:  0.66,
+  NOTE_DUR_COLD: '2n',
+  NOTE_DUR_MID:  '4n',
+  NOTE_DUR_HOT:  '8n',
+  REVERB_WET_MIN: 0.05,  REVERB_WET_MAX: 0.88,
+  DELAY_WET_MIN:  0.0,   DELAY_WET_MAX:  0.50,
+  PM25_DARK_THRESH: 0.70,
+  DRONE_NOTES: ['C2','G2','C3'],
+  DRONE_VOL:  -26, MELODY_VOL: -7, PERC_VOL: -11, DARK_VOL: -16,
+  NOTE_HUE: { C:0, D:28, E:58, G:130, A:210 },
+  BASE_INTERVAL_MS: 1400,
+};
+
+
+// ================================================================
+// MODULE: DATA
+// ================================================================
+const DataModule = (() => {
+  function generateSynthetic() {
+    const records = [];
+    const origin  = new Date('2024-01-01');
+    for (let i = 0; i < 365; i++) {
+      const d = new Date(origin);
+      d.setDate(origin.getDate() + i);
+      const φ = (i / 365) * Math.PI * 2;
+      const temperature = Math.round((15 - 20*Math.cos(φ) + (Math.random()-0.5)*4)*10)/10;
+      const humidity    = Math.round(Math.max(18,Math.min(93, 58+28*Math.sin(φ-0.55)+(Math.random()-0.5)*12))*10)/10;
+      const pm25        = Math.round(Math.max(5,Math.min(130,  32+36*Math.pow(Math.cos(φ+Math.PI*0.45),2)+(Math.random()-0.35)*26))*10)/10;
+      records.push({ date: d.toISOString().slice(0,10), pm25, temperature, humidity });
+    }
+    return records;
+  }
+  function parseCSV(text) {
+    const lines = text.trim().split(/\r?\n/);
+    const hdr   = lines[0].split(',').map(s=>s.trim());
+    return lines.slice(1).map(line=>{
+      const v = line.split(',').map(s=>s.trim());
+      const o = {};
+      hdr.forEach((h,i)=>{ o[h] = isNaN(v[i]) ? v[i] : parseFloat(v[i]); });
+      return o;
+    }).filter(r=>r.date && !isNaN(r.pm25) && !isNaN(r.temperature) && !isNaN(r.humidity));
+  }
+  function normalize(records) {
+    const range = arr => ({ min:Math.min(...arr), max:Math.max(...arr) });
+    const norm  = (v,s) => s.max===s.min ? 0.5 : (v-s.min)/(s.max-s.min);
+    const stat  = {
+      pm25: range(records.map(r=>r.pm25)),
+      temp: range(records.map(r=>r.temperature)),
+      hum:  range(records.map(r=>r.humidity)),
+    };
+    return records.map(r=>({
+      ...r,
+      pm25Norm: norm(r.pm25,        stat.pm25),
+      tempNorm: norm(r.temperature, stat.temp),
+      humNorm:  norm(r.humidity,    stat.hum),
+    }));
+  }
+  async function load() {
+    try {
+      const res = await fetch('./data/air.csv');
+      if (!res.ok) throw new Error('HTTP '+res.status);
+      const raw = parseCSV(await res.text());
+      if (raw.length < 2) throw new Error('empty');
+      return normalize(raw);
+    } catch(_) {
+      return normalize(generateSynthetic());
+    }
+  }
+  return { load };
+})();
+
+
+// ================================================================
+// MODULE: SONIFICATION
+// ================================================================
+const SonificationModule = (() => {
+  function getNote(pm25Norm) {
+    const idx = Math.min(Math.floor(pm25Norm * MAPPING.PENTATONIC.length), MAPPING.PENTATONIC.length-1);
+    return MAPPING.PENTATONIC[idx];
+  }
+  function getNoteDuration(tempNorm) {
+    if (tempNorm < MAPPING.TEMP_COLD_THRESH) return MAPPING.NOTE_DUR_COLD;
+    if (tempNorm > MAPPING.TEMP_HOT_THRESH)  return MAPPING.NOTE_DUR_HOT;
+    return MAPPING.NOTE_DUR_MID;
+  }
+  function getReverbWet(humNorm) { return MAPPING.REVERB_WET_MIN + humNorm*(MAPPING.REVERB_WET_MAX-MAPPING.REVERB_WET_MIN); }
+  function getDelayWet(humNorm)  { return MAPPING.DELAY_WET_MIN  + humNorm*(MAPPING.DELAY_WET_MAX -MAPPING.DELAY_WET_MIN ); }
+  function getNoteHue(noteName)  { return MAPPING.NOTE_HUE[noteName.replace(/[0-9]/g,'')] ?? 180; }
+  return { getNote, getNoteDuration, getReverbWet, getDelayWet, getNoteHue };
+})();
+
+
+// ================================================================
+// MODULE: AUDIO (Tone.js)
+// ================================================================
+const AudioModule = (() => {
+  let ready = false;
+  let reverb, delay, drone, melody, perc, dark;
+
+  async function init() {
+    if (ready) return;
+    await Tone.start();
+    reverb = new Tone.Reverb({ decay:5.5, preDelay:0.05, wet:0.3 });
+    await reverb.generate();
+    reverb.toDestination();
+    delay  = new Tone.FeedbackDelay({ delayTime:'8n.', feedback:0.32, wet:0.18 }).connect(reverb);
+    drone  = new Tone.PolySynth(Tone.Synth, {
+      oscillator:{type:'sine'}, envelope:{attack:2.5,decay:0,sustain:1,release:4}, volume:MAPPING.DRONE_VOL
+    }).connect(reverb);
+    melody = new Tone.AMSynth({
+      oscillator:{type:'sine'}, envelope:{attack:0.06,decay:0.4,sustain:0.35,release:2.0},
+      modulation:{type:'triangle'}, modulationEnvelope:{attack:0.3,decay:0.1,sustain:0.8,release:0.8},
+      harmonicity:2, volume:MAPPING.MELODY_VOL
+    }).connect(delay);
+    perc   = new Tone.MembraneSynth({ pitchDecay:0.06, octaves:7, envelope:{attack:0.001,decay:0.45,sustain:0,release:0.4}, volume:MAPPING.PERC_VOL }).connect(reverb);
+    dark   = new Tone.NoiseSynth({ noise:{type:'brown'}, envelope:{attack:0.005,decay:0.28,sustain:0,release:0.2}, volume:MAPPING.DARK_VOL }).connect(reverb);
+    ready  = true;
+  }
+  function startDrone() { if (ready) drone.triggerAttack(MAPPING.DRONE_NOTES, Tone.now()+0.1); }
+  function stopDrone()  { if (ready) drone.triggerRelease(MAPPING.DRONE_NOTES, Tone.now()+0.8); }
+  function playStep(d) {
+    if (!ready) return null;
+    const note=SonificationModule.getNote(d.pm25Norm), dur=SonificationModule.getNoteDuration(d.tempNorm);
+    const isDark = d.pm25Norm > MAPPING.PM25_DARK_THRESH, now = Tone.now();
+    reverb.wet.rampTo(SonificationModule.getReverbWet(d.humNorm), 1.2);
+    delay.wet.rampTo(SonificationModule.getDelayWet(d.humNorm),   1.2);
+    melody.harmonicity.rampTo(isDark ? 9 : 2, 0.7);
+    melody.triggerAttackRelease(note, dur, now);
+    if (isDark) { perc.triggerAttackRelease('C1','16n',now+0.08); dark.triggerAttackRelease('16n',now+0.04); }
+    return note;
+  }
+  return { init, startDrone, stopDrone, playStep };
+})();
+
+
+// ================================================================
+// MODULE: MUSIC — Web Audio API
+// ================================================================
+const MusicModule = (() => {
+  let audioCtx  = null;
+  let analyser  = null;
+  let gainNode  = null;
+  let source    = null;
+  let buffer    = null;
+  let _playing  = false;
+  let startTime = 0;
+  let startOff  = 0;
+  let _onEndedCb = null;
+
+  let rawFreq   = null;
+  let rawTime   = null;
+  let smoothFreq = null;
+  const SMOOTH  = 0.78;
+
+  function boot() {
+    if (audioCtx) return;
+    audioCtx  = new (window.AudioContext || window.webkitAudioContext)();
+    analyser  = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0;
+    gainNode  = audioCtx.createGain();
+    gainNode.gain.value = 1.0;
+    analyser.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+    const N   = analyser.frequencyBinCount;
+    rawFreq   = new Uint8Array(N);
+    rawTime   = new Uint8Array(N);
+    smoothFreq = new Float32Array(N);
+  }
+
+  async function loadFile(file) {
+    boot();
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
+    const ab = await file.arrayBuffer();
+    return new Promise((res, rej) => {
+      audioCtx.decodeAudioData(ab, decoded => {
+        buffer   = decoded;
+        startOff = 0;
+        smoothFreq.fill(0);
+        res({ duration: decoded.duration, sampleRate: decoded.sampleRate, channels: decoded.numberOfChannels });
+      }, rej);
+    });
+  }
+
+  function play(offset) {
+    if (!buffer) return;
+    if (source) { try { source.stop(); } catch(_){} source = null; }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    offset = offset ?? startOff;
+    source = audioCtx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(analyser);
+    source.start(0, offset);
+    startTime = audioCtx.currentTime - offset;
+    _playing  = true;
+    source.onended = () => {
+      _playing = false;
+      startOff = 0;
+      if (_onEndedCb) _onEndedCb();
+    };
+  }
+
+  function stop() {
+    if (source) {
+      startOff = getCurrentTime();
+      try { source.stop(); } catch(_){}
+      source   = null;
+    }
+    _playing = false;
+  }
+
+  function getCurrentTime() {
+    if (!audioCtx || !_playing) return startOff;
+    return Math.min(audioCtx.currentTime - startTime, getDuration());
+  }
+
+  function getDuration() { return buffer ? buffer.duration : 0; }
+
+  function getAnalysis() {
+    if (!analyser || !rawFreq) return null;
+    analyser.getByteFrequencyData(rawFreq);
+    analyser.getByteTimeDomainData(rawTime);
+    const N     = analyser.frequencyBinCount;
+    const binHz = audioCtx.sampleRate / analyser.fftSize;
+    for (let i = 0; i < N; i++)
+      smoothFreq[i] = smoothFreq[i]*SMOOTH + (rawFreq[i]/255)*(1-SMOOTH);
+    const bandEnergy = (loHz, hiHz) => {
+      const lo = Math.max(0,   Math.floor(loHz / binHz));
+      const hi = Math.min(N-1, Math.ceil( hiHz / binHz));
+      let s = 0;
+      for (let i=lo; i<=hi; i++) s += smoothFreq[i];
+      return s / (hi - lo + 1);
+    };
+    return {
+      freq:   smoothFreq,
+      time:   rawTime,
+      binCount: N,
+      binHz,
+      bass:   bandEnergy(20,   250),
+      mid:    bandEnergy(250,  2000),
+      treble: bandEnergy(2000, 8000),
+      energy: bandEnergy(20,   8000),
+    };
+  }
+
+  function setOnEnded(cb) { _onEndedCb = cb; }
+
+  return { loadFile, play, stop, getAnalysis, getCurrentTime, getDuration,
+           isPlaying:()=>_playing, hasBuffer:()=>!!buffer, setOnEnded };
+})();
+
+
+// ================================================================
+// MODULE: BEAT DETECTOR
+// ================================================================
+const BeatDetector = (() => {
+  let smoothedBass = 0;
+  let lastBeatMs   = 0;
+  const THRESH  = 1.50;
+  const MIN_GAP = 220;
+
+  function detect(bass) {
+    const now    = performance.now();
+    const isBeat = bass > smoothedBass * THRESH
+                && bass > 0.07
+                && now - lastBeatMs > MIN_GAP;
+    smoothedBass = smoothedBass * 0.88 + bass * 0.12;
+    if (isBeat) { lastBeatMs = now; return true; }
+    return false;
+  }
+  function reset() { smoothedBass = 0; lastBeatMs = 0; }
+  return { detect, reset };
+})();
+
+
+// ================================================================
+// MODULE: VISUAL — p5.js
+// ================================================================
+const VisualModule = (() => {
+  let inst        = null;
+  let appMode     = 'data';
+  let dataSnap    = null;
+  let currentHue  = 180;
+  const particles = [];
+  const ripples   = [];
+
+  let binMap = null;
+  const NUM_BARS  = 220;
+
+  function buildBinMap(binCount, binHz) {
+    const minHz  = 30,  maxHz = 14000;
+    const logMin = Math.log10(Math.max(1, minHz / binHz));
+    const logMax = Math.log10(Math.min(binCount-1, maxHz / binHz));
+    binMap = Array.from({ length: NUM_BARS }, (_, i) => {
+      const t = i / NUM_BARS;
+      return Math.min(Math.round(Math.pow(10, logMin + t*(logMax-logMin))), binCount-1);
+    });
+  }
+
+  class Particle {
+    constructor(p, opts) {
+      const { pm25Norm=0.3, burst=false, energy=0.3, trebleSpark=false } = opts;
+      this.p  = p;
+      if (trebleSpark) {
+        const angle = p.random(p.TWO_PI);
+        const r = p.min(p.width, p.height) * p.random(0.25, 0.45);
+        this.x = p.width/2  + Math.cos(angle) * r;
+        this.y = p.height/2 + Math.sin(angle) * r;
+        this.vx = Math.cos(angle) * p.random(0.5, 2.5);
+        this.vy = Math.sin(angle) * p.random(0.5, 2.5);
+        this.r  = p.random(0.8, 2.5);
+        this.life  = 1.0;
+        this.decay = p.random(0.018, 0.035);
+        this.alpha = p.random(20, 55) * energy;
+        this.hue   = (currentHue + p.random(-60, 60)) % 360;
+        this.sat   = 75;
+      } else if (burst) {
+        this.x  = p.random(p.width*0.25, p.width*0.75);
+        this.y  = p.random(p.height*0.3, p.height*0.7);
+        const spd = 1.5 + energy*4;
+        this.vx = p.random(-0.6,0.6) * spd;
+        this.vy = p.random(-3,-0.5)*spd;
+        this.r  = p.random(1.5, 5+energy*8);
+        this.life  = 1.0;
+        this.decay = p.random(0.012,0.022);
+        this.alpha = p.random(30,80)*(0.5+energy);
+        this.hue   = (currentHue + p.random(-40,40)) % 360;
+        this.sat   = 70;
+      } else {
+        this.x  = p.random(p.width);
+        this.y  = p.random(p.height*0.5, p.height);
+        const spd = 0.4 + pm25Norm*0.85;
+        this.vx = p.random(-0.6,0.6) * spd;
+        this.vy = p.random(-0.85,-0.12)*spd;
+        this.r  = p.random(1.2, 2.2+pm25Norm*9);
+        this.life  = 1.0;
+        this.decay = p.random(0.004,0.009)*(1-pm25Norm*0.4);
+        this.alpha = p.random(12,52)*(0.35+pm25Norm*0.85);
+        this.hue   = p.lerp(195,40,pm25Norm);
+        this.sat   = p.lerp(18,68,pm25Norm);
+      }
+    }
+    update() {
+      this.x   += this.vx;
+      this.y   += this.vy;
+      this.life -= this.decay;
+      if (this.x < 0) this.x = this.p.width;
+      if (this.x > this.p.width) this.x = 0;
+    }
+    draw() {
+      this.p.fill(this.hue, this.sat, 88, this.alpha*this.life);
+      this.p.ellipse(this.x, this.y, this.r*2);
+    }
+    dead() { return this.life<=0 || this.y<-10; }
+  }
+
+  class Ripple {
+    constructor(p, x, y, hue, maxR, thick) {
+      this.p=p; this.x=x; this.y=y; this.hue=hue;
+      this.r=2; this.maxR=maxR||(55+p.random(65));
+      this.thick=thick||1; this.life=1.0;
+    }
+    update() { this.r+=2.4; this.life=1-this.r/this.maxR; }
+    draw() {
+      this.p.noFill();
+      this.p.stroke(this.hue,50,96,this.life*22);
+      this.p.strokeWeight(this.thick+2.5);
+      this.p.ellipse(this.x,this.y,this.r*2);
+      this.p.stroke(this.hue,55,98,this.life*55);
+      this.p.strokeWeight(this.thick);
+      this.p.ellipse(this.x,this.y,this.r*2);
+      this.p.noStroke();
+    }
+    dead() { return this.r>=this.maxR; }
+  }
+
+  function createSketch() {
+    return (p) => {
+      let W, H;
+
+      p.setup = () => {
+        const cvs = p.createCanvas(p.windowWidth, p.windowHeight);
+        cvs.parent('canvas-container');
+        p.colorMode(p.HSB, 360, 100, 100, 100);
+        p.noStroke(); p.noiseSeed(42);
+        W = p.width; H = p.height;
+      };
+      p.windowResized = () => { p.resizeCanvas(p.windowWidth, p.windowHeight); W=p.width; H=p.height; };
+
+      p.draw = () => {
+        p.noStroke();
+        p.fill(228, 20, 5, 18);
+        p.rect(0, 0, W, H);
+
+        if (appMode === 'data') {
+          drawData(p);
+        } else {
+          drawMusic(p);
+        }
+
+        for (let i=ripples.length-1; i>=0; i--) {
+          ripples[i].update(); ripples[i].draw();
+          if (ripples[i].dead()) ripples.splice(i,1);
+        }
+        p.noStroke();
+        for (let i=particles.length-1; i>=0; i--) {
+          const pt=particles[i];
+          pt.update(); pt.draw();
+          if (pt.dead()) particles.splice(i,1);
+        }
+      };
+
+      // ─── 데이터 모드 ───
+      function drawData(p) {
+        if (!dataSnap) return;
+        const { pm25Norm, tempNorm, humNorm } = dataSnap;
+
+        for (let y=0; y<H*0.52; y+=3) {
+          const t  = y/(H*0.52);
+          const sH = p.lerp(218,38,pm25Norm*0.78);
+          const sS = p.lerp(28,55,pm25Norm);
+          const sB = p.lerp(10,24,humNorm*0.35);
+          p.fill(sH, sS*(1-t*0.38), sB+t*9, 4);
+          p.rect(0, y, W, 3);
+        }
+        const cnt = Math.ceil(pm25Norm*4);
+        for (let i=0; i<cnt && particles.length<520; i++)
+          particles.push(new Particle(p,{pm25Norm}));
+        drawGlow(p, p.min(W,H)*0.27, pm25Norm);
+        for (let i=0; i<38; i++) {
+          const t   = i/38;
+          const n   = p.noise(t*4.5, p.frameCount*0.014*(0.5+pm25Norm*0.85));
+          const bh  = n*H*0.13*(0.38+pm25Norm*0.72);
+          p.fill((currentHue+t*42)%360, 52,80, 18+pm25Norm*28);
+          p.rect(i*(W/38), H-bh, W/38-1, bh);
+        }
+      }
+
+      // ─── 음악 모드 ───
+      function drawMusic(p) {
+        const analysis = MusicModule.isPlaying() ? MusicModule.getAnalysis() : null;
+        if (!analysis) {
+          drawGlow(p, p.min(W,H)*0.2*(0.8+0.2*Math.sin(p.frameCount*0.04)), 0.1);
+          return;
+        }
+
+        const { freq, time, binCount, binHz, bass, mid, treble, energy } = analysis;
+        if (!binMap) buildBinMap(binCount, binHz);
+
+        // 1. 배경 에너지
+        drawMusicAtmosphere(p, bass, mid, energy);
+
+        // 2. 오로라 (mid 기반)
+        drawAurora(p, mid, energy);
+
+        // 3. 원형 FFT 스펙트럼 (이중 링)
+        drawCircularSpectrum(p, freq, binCount, bass);
+
+        // 4. 시간도메인 파형 + 미러
+        drawTimeDomainWave(p, time, energy);
+
+        // 5. 중심 오라
+        drawGlow(p, p.min(W,H)*(0.12 + mid*0.20), mid);
+
+        // 6. Treble 스파크 입자 스폰
+        if (treble > 0.18 && particles.length < 500) {
+          const cnt = Math.ceil(treble * 3);
+          for (let i=0; i<cnt; i++)
+            particles.push(new Particle(p, { trebleSpark:true, energy:treble }));
+        }
+
+        // 7. 하단 에너지 바
+        for (let i=0; i<48; i++) {
+          const t   = i/48;
+          const amp = freq[binMap ? binMap[Math.floor(t*NUM_BARS)] : i] ?? 0;
+          const bh  = amp*H*0.14;
+          const hue = (currentHue + t*360) % 360;
+          p.fill(hue, 68, 88, 12+amp*40);
+          p.rect(i*(W/48), H-bh, W/48-1, bh);
+        }
+      }
+
+      function drawMusicAtmosphere(p, bass, mid, energy) {
+        const skyH = (currentHue + 180) % 360;
+        for (let y=0; y<H*0.5; y+=3) {
+          const t = y/(H*0.5);
+          p.fill(skyH, 30+mid*25, 8+energy*12, 3+bass*5);
+          p.rect(0, y, W, 3);
+        }
+        // 사이드 빛줄기 (bass 반응)
+        if (bass > 0.12) {
+          const cx = W/2, cy = H/2;
+          const numRays = 6;
+          p.push();
+          for (let i=0; i<numRays; i++) {
+            const angle = (i/numRays)*p.TWO_PI + p.frameCount*0.004;
+            const len   = p.min(W,H) * 0.55 * (0.4 + bass * 0.7);
+            p.stroke((currentHue + i*55)%360, 55, 90, bass*10);
+            p.strokeWeight(1.5);
+            p.line(cx, cy, cx + Math.cos(angle)*len, cy + Math.sin(angle)*len);
+          }
+          p.pop();
+          p.noStroke();
+        }
+      }
+
+      // 오로라 효과 (mid 기반 수평 밴드)
+      function drawAurora(p, mid, energy) {
+        if (mid < 0.04 && energy < 0.04) return;
+        const numBands = 4;
+        for (let b = 0; b < numBands; b++) {
+          const baseY = H * (0.22 + b * 0.13);
+          const hue   = (currentHue + b * 80) % 360;
+          for (let x = 0; x <= W; x += 8) {
+            const nx = x / W;
+            const n1 = p.noise(nx * 2.2 + b * 1.8, p.frameCount * 0.006 + b * 0.55);
+            const n2 = p.noise(nx * 3.6 + b * 0.9, p.frameCount * 0.010 + b * 0.4 + 100);
+            const waveY = baseY + (n1 - 0.5) * H * 0.09 * (0.5 + mid);
+            const h2    = H * 0.05 * n2 * (0.4 + mid);
+            const fade  = 1 - Math.pow(Math.abs(nx - 0.5) * 1.9, 2);
+            const alpha = mid * 13 * n2 * Math.max(0, fade) * (1 - b * 0.18);
+            p.fill(hue, 52, 86, Math.max(0, alpha));
+            p.ellipse(x, waveY, 9, h2 * 2);
+          }
+        }
+      }
+
+      // 원형 FFT 스펙트럼 (내부 링 + 외부 미러 링)
+      function drawCircularSpectrum(p, freq, binCount, bass) {
+        if (!binMap) return;
+        const cx = W/2, cy = H/2;
+        const baseR   = p.min(W,H) * (0.18 + bass*0.04);
+        const maxBarH = p.min(W,H) * 0.22;
+
+        p.push();
+        // 내부 링
+        for (let i=0; i<NUM_BARS; i++) {
+          const angle  = (i/NUM_BARS)*p.TWO_PI - p.HALF_PI;
+          const amp    = Math.min(1, freq[binMap[i]] * 1.4);
+          if (amp < 0.01) continue;
+          const barH  = amp * maxBarH;
+          const cos   = Math.cos(angle);
+          const sin_  = Math.sin(angle);
+          const x1    = cx + cos*baseR,        y1 = cy + sin_*baseR;
+          const x2    = cx + cos*(baseR+barH),  y2 = cy + sin_*(baseR+barH);
+          const hue   = (currentHue + (i/NUM_BARS)*260) % 360;
+          const alpha = 25 + amp*58;
+
+          p.stroke(hue, 65, 90, alpha*0.28);
+          p.strokeWeight(3.5);
+          p.line(x1, y1, x2, y2);
+          p.stroke(hue, 50, 98, alpha);
+          p.strokeWeight(1.3);
+          p.line(x1, y1, x2, y2);
+        }
+
+        // 외부 미러 링 (절반 밀도)
+        const outerR   = baseR + maxBarH * 1.08;
+        const outerMax = p.min(W,H) * 0.07;
+        for (let i=0; i<NUM_BARS; i+=2) {
+          const angle = (i/NUM_BARS)*p.TWO_PI - p.HALF_PI;
+          const amp   = Math.min(1, freq[binMap[i]] * 1.0);
+          if (amp < 0.02) continue;
+          const barH  = amp * outerMax;
+          const cos   = Math.cos(angle);
+          const sin_  = Math.sin(angle);
+          const hue   = (currentHue + 170 + (i/NUM_BARS)*180) % 360;
+          p.stroke(hue, 55, 85, 10 + amp*25);
+          p.strokeWeight(1.0);
+          p.line(cx+cos*outerR, cy+sin_*outerR, cx+cos*(outerR+barH), cy+sin_*(outerR+barH));
+        }
+        p.pop();
+        p.noStroke();
+      }
+
+      // 시간도메인 파형 + 상단 미러
+      function drawTimeDomainWave(p, time, energy) {
+        const baseY  = H * 0.82;
+        const amp    = H * 0.09 * (0.4 + energy*1.5);
+        const mirrorY = H * 0.18;
+
+        p.push();
+        // 메인 파형
+        p.stroke(currentHue, 45, 95, 35 + energy*40);
+        p.strokeWeight(1.2);
+        p.noFill();
+        p.beginShape();
+        for (let i=0; i<time.length; i++) {
+          const x = p.map(i, 0, time.length-1, 0, W);
+          const y = baseY + p.map(time[i], 0, 255, amp, -amp);
+          p.vertex(x, y);
+        }
+        p.endShape();
+
+        // 미러 파형 (상단, 반투명)
+        p.stroke((currentHue + 145) % 360, 38, 88, 16 + energy*20);
+        p.strokeWeight(0.8);
+        p.beginShape();
+        for (let i=0; i<time.length; i++) {
+          const x = p.map(i, 0, time.length-1, 0, W);
+          const y = mirrorY - p.map(time[i], 0, 255, amp*0.60, -amp*0.60);
+          p.vertex(x, y);
+        }
+        p.endShape();
+        p.pop();
+        p.noStroke();
+      }
+
+      function drawGlow(p, radius, intensity) {
+        const cx = W/2, cy = H/2;
+        for (let r=radius; r>0; r-=4) {
+          const t = 1 - r/radius;
+          p.fill(currentHue, 48+intensity*34, 84, t*t*13*(1-intensity*0.15));
+          p.ellipse(cx, cy, r*2);
+        }
+        p.fill(currentHue, 30, 100, 46);
+        p.ellipse(cx, cy, 5);
+      }
+
+      p.onDataStep = (data, hue) => {
+        dataSnap    = data;
+        currentHue  = hue;
+        spawnRipple(p, hue, data.pm25Norm > MAPPING.PM25_DARK_THRESH);
+      };
+
+      p.onBeat = (analysis, hue) => {
+        currentHue = hue;
+        const cnt = Math.ceil(5 + analysis.bass*20);
+        for (let i=0; i<cnt && particles.length<600; i++)
+          particles.push(new Particle(p,{ burst:true, energy:analysis.bass }));
+        ripples.push(new Ripple(p, W/2, H/2, hue, p.min(W,H)*0.35*(0.5+analysis.bass), 1.5));
+        for (let i=0; i<3; i++)
+          ripples.push(new Ripple(p, p.random(W*0.15,W*0.85), p.random(H*0.15,H*0.85), (hue+100+i*80)%360, 40+p.random(70)));
+      };
+
+      p.setMode = (m) => { appMode = m; particles.length=0; ripples.length=0; };
+    };
+  }
+
+  function spawnRipple(p, hue, isDark) {
+    ripples.push(new Ripple(p, p.random(p.width*0.2, p.width*0.8), p.random(p.height*0.2, p.height*0.75), hue));
+    if (isDark) {
+      for (let i=0; i<4; i++)
+        ripples.push(new Ripple(p, p.random(p.width), p.random(p.height), (hue+155+i*35)%360, 35+Math.random()*70));
+    }
+  }
+
+  function init()            { inst = new p5(createSketch()); }
+  function onDataStep(d,hue) { if (inst&&inst.onDataStep) inst.onDataStep(d,hue); }
+  function onBeat(a,hue)     { if (inst&&inst.onBeat) inst.onBeat(a,hue); }
+  function setMode(m)        { appMode=m; if(inst&&inst.setMode) inst.setMode(m); }
+
+  return { init, onDataStep, onBeat, setMode };
+})();
+
+
+// ================================================================
+// MAIN
+// ================================================================
+let dataset   = [];
+let step      = 0;
+let playing   = false;
+let ticker    = null;
+let speed     = 1;
+let appMode   = 'data';
+
+const $          = id => document.getElementById(id);
+const playBtn    = $('play-btn');
+const speedGroup = $('speed-group');
+const speedSlider= $('speed-slider');
+const speedValEl = $('speed-val');
+const noteReadout= $('note-readout');
+const beatIndicator = $('beat-indicator');
+const uiDate     = $('ui-date');
+const uiStep     = $('ui-step');
+const statusBar  = $('status-bar');
+const fileInput  = $('file-input');
+const dropZone   = $('drop-zone');
+const musicInfo  = $('music-info');
+const progressWrap = $('progress-wrap');
+const progressFill = $('progress-fill');
+const progressTime = $('progress-time');
+
+function fmtTime(sec) {
+  sec = Math.max(0, Math.floor(sec));
+  return `${Math.floor(sec/60)}:${String(sec%60).padStart(2,'0')}`;
+}
+
+function updateDataHUD(d, note) {
+  uiDate.textContent             = d.date;
+  uiStep.textContent             = `STEP ${step+1} / ${dataset.length}`;
+  noteReadout.textContent        = `♩ ${note}`;
+  $('val-pm25').textContent      = `${d.pm25} μg/m³`;
+  $('val-temp').textContent      = `${d.temperature} °C`;
+  $('val-humidity').textContent  = `${d.humidity} %`;
+  $('bar-pm25').style.width      = `${d.pm25Norm*100}%`;
+  $('bar-temp').style.width      = `${d.tempNorm*100}%`;
+  $('bar-humidity').style.width  = `${d.humNorm*100}%`;
+}
+
+let musicHudRaf = null;
+function startMusicHUD() {
+  if (musicHudRaf) return;
+  function loop() {
+    if (appMode !== 'music') { musicHudRaf=null; return; }
+
+    // 곡 종료 감지
+    if (playing && !MusicModule.isPlaying() && MusicModule.hasBuffer()) {
+      playing = false;
+      playBtn.textContent = '▶';
+      progressFill.style.width = '100%';
+      const dur = MusicModule.getDuration();
+      progressTime.textContent = `${fmtTime(dur)} / ${fmtTime(dur)}`;
+    }
+
+    const a = MusicModule.getAnalysis();
+    if (a) {
+      $('val-bass').textContent   = `${Math.round(a.bass*100)}%`;
+      $('val-mid').textContent    = `${Math.round(a.mid*100)}%`;
+      $('val-treble').textContent = `${Math.round(a.treble*100)}%`;
+      $('bar-bass').style.width   = `${a.bass*100}%`;
+      $('bar-mid').style.width    = `${a.mid*100}%`;
+      $('bar-treble').style.width = `${a.treble*100}%`;
+
+      if (BeatDetector.detect(a.bass)) {
+        let maxAmp=0, maxBin=0;
+        for (let i=1; i<a.binCount*0.6; i++) if(a.freq[i]>maxAmp){maxAmp=a.freq[i];maxBin=i;}
+        const hz  = maxBin * a.binHz;
+        const hue = ((Math.log10(Math.max(hz,30)/30)/Math.log10(14000/30))*320) % 360;
+        VisualModule.onBeat(a, hue);
+        beatIndicator.classList.add('flash');
+        setTimeout(()=>beatIndicator.classList.remove('flash'), 80);
+      }
+
+      if (MusicModule.isPlaying()) {
+        const cur = MusicModule.getCurrentTime();
+        const dur = MusicModule.getDuration();
+        progressFill.style.width  = `${(cur/dur)*100}%`;
+        progressTime.textContent  = `${fmtTime(cur)} / ${fmtTime(dur)}`;
+      }
+    }
+    musicHudRaf = requestAnimationFrame(loop);
+  }
+  musicHudRaf = requestAnimationFrame(loop);
+}
+
+async function dataTick() {
+  if (!playing || dataset.length===0 || appMode!=='data') return;
+  const d    = dataset[step];
+  const note = AudioModule.playStep(d);
+  if (!note) return;
+  const hue  = SonificationModule.getNoteHue(note);
+  VisualModule.onDataStep(d, hue);
+  updateDataHUD(d, note);
+  step = (step+1) % dataset.length;
+}
+
+function resetTicker() {
+  clearInterval(ticker);
+  ticker = setInterval(dataTick, MAPPING.BASE_INTERVAL_MS / speed);
+}
+
+async function togglePlay() {
+  if (appMode === 'data') {
+    if (!playing) {
+      await AudioModule.init();
+      playing = true;
+      playBtn.textContent = '⏸';
+      statusBar.style.opacity = '0';
+      AudioModule.startDrone();
+      resetTicker();
+    } else {
+      playing = false;
+      playBtn.textContent = '▶';
+      clearInterval(ticker);
+      AudioModule.stopDrone();
+    }
+  } else {
+    if (!MusicModule.hasBuffer()) {
+      statusBar.textContent = '먼저 음악 파일을 업로드하세요';
+      statusBar.style.opacity = '1';
+      return;
+    }
+    if (!MusicModule.isPlaying()) {
+      MusicModule.play();
+      playing = true;
+      playBtn.textContent = '⏸';
+      startMusicHUD();
+      $('progress-wrap').style.display = 'flex';
+      statusBar.style.opacity = '0';
+    } else {
+      MusicModule.stop();
+      playing = false;
+      playBtn.textContent = '▶';
+    }
+  }
+}
+
+function switchMode(m) {
+  if (appMode === m) return;
+
+  // 현재 모드에 따라 정확하게 정지
+  if (appMode === 'data') {
+    if (playing) {
+      playing = false;
+      playBtn.textContent = '▶';
+      clearInterval(ticker);
+      AudioModule.stopDrone();
+    }
+  } else {
+    // music 모드: 재생 중이든 끝났든 확실히 정리
+    if (MusicModule.isPlaying()) MusicModule.stop();
+    playing = false;
+    playBtn.textContent = '▶';
+  }
+
+  appMode = m;
+  VisualModule.setMode(m);
+  BeatDetector.reset();
+
+  if (m === 'data') {
+    $('title-mode').textContent    = "[City's Breath]";
+    $('subtitle-text').textContent = "City's Breath · Generative A/V";
+    $('section-data').style.display  = '';
+    $('section-music').style.display = 'none';
+    $('speed-group').style.display   = '';
+    noteReadout.style.display        = '';
+    beatIndicator.style.display      = 'none';
+    $('legend-data').style.display   = '';
+    $('legend-music').style.display  = 'none';
+    $('date-group').style.display    = '';
+    $('btn-data-mode').classList.add('active');
+    $('btn-music-mode').classList.remove('active');
+    statusBar.textContent = `${dataset.length}일치 데이터 준비 완료 · ▶ 버튼으로 시작`;
+    statusBar.style.opacity = '1';
+  } else {
+    $('title-mode').textContent    = "[Music's Breath]";
+    $('subtitle-text').textContent = "Music's Breath · Live Visualization";
+    $('section-data').style.display    = 'none';
+    $('section-music').style.display   = 'flex';
+    $('speed-group').style.display     = 'none';
+    noteReadout.style.display          = 'none';
+    beatIndicator.style.display        = 'block';
+    $('legend-data').style.display     = 'none';
+    $('legend-music').style.display    = '';
+    $('date-group').style.display      = 'none';
+    $('btn-music-mode').classList.add('active');
+    $('btn-data-mode').classList.remove('active');
+    if (!MusicModule.hasBuffer()) {
+      statusBar.textContent = 'MP4 · WAV · MP3 파일을 업로드하면 음악에 맞춰 시각화됩니다';
+      statusBar.style.opacity = '1';
+    }
+  }
+}
+
+async function loadMusicFile(file) {
+  if (!file) return;
+  statusBar.textContent = `"${file.name}" 디코딩 중...`;
+  statusBar.style.opacity = '1';
+  try {
+    const info = await MusicModule.loadFile(file);
+    $('music-filename').textContent = file.name;
+    $('music-meta').textContent =
+      `${fmtTime(info.duration)} · ${(info.sampleRate/1000).toFixed(1)} kHz · ${info.channels}ch`;
+    musicInfo.style.display   = 'flex';
+    dropZone.style.display    = 'none';
+    progressWrap.style.display= 'flex';
+    progressFill.style.width  = '0%';
+    progressTime.textContent  = `0:00 / ${fmtTime(info.duration)}`;
+    statusBar.textContent     = `"${file.name}" 로드 완료 · ▶ 버튼으로 시작`;
+    BeatDetector.reset();
+  } catch(err) {
+    statusBar.textContent = '파일을 디코딩할 수 없습니다 (형식 확인 필요)';
+    console.error('[Music] 디코딩 실패:', err);
+  }
+}
+
+// 이벤트
+playBtn.addEventListener('click', togglePlay);
+
+speedSlider.addEventListener('input', e => {
+  speed = parseFloat(e.target.value);
+  speedValEl.textContent = `${speed}×`;
+  if (playing && appMode==='data') resetTicker();
+});
+
+$('btn-data-mode').addEventListener('click',  () => switchMode('data'));
+$('btn-music-mode').addEventListener('click', () => switchMode('music'));
+
+dropZone.addEventListener('click', () => fileInput.click());
+musicInfo.addEventListener('click', () => fileInput.click());
+
+fileInput.addEventListener('change', e => {
+  if (e.target.files[0]) loadMusicFile(e.target.files[0]);
+});
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave',    () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) loadMusicFile(file);
+});
+
+// 앱 초기화
+(async () => {
+  VisualModule.init();
+  dataset = await DataModule.load();
+  statusBar.textContent = `${dataset.length}일치 데이터 준비 완료 · ▶ 버튼으로 시작`;
+  if (dataset.length > 0) {
+    updateDataHUD(dataset[0], MAPPING.PENTATONIC[0]);
+    VisualModule.onDataStep(dataset[0], SonificationModule.getNoteHue(MAPPING.PENTATONIC[0]));
+  }
+})();
+</script>
+</body>
+</html>
